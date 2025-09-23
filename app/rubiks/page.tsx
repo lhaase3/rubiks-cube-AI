@@ -36,6 +36,7 @@ export default function RubiksPage() {
   const [debugData, setDebugData] = useState<any>(null);
 
   const SOLVER_URL = process.env.NEXT_PUBLIC_SOLVER_URL || "http://localhost:5001/solve";
+  const DEBUG_URL = process.env.NEXT_PUBLIC_DEBUG_URL || "http://localhost:5001/debug-colors";
 
   // Start/stop webcam when modal opens/closes
   useEffect(() => {
@@ -87,6 +88,32 @@ export default function RubiksPage() {
   };
 
   const allSet = FACE_ORDER.every(f => faces[f].file);
+
+  const debugColors = async () => {
+    if (!allSet) { 
+      setError("Please provide all 6 faces first."); 
+      return; 
+    }
+    
+    setError(""); 
+    setDebugData(null);
+    
+    const fd = new FormData();
+    FACE_ORDER.forEach(face => { 
+      if (faces[face].file) fd.append(face, faces[face].file as File); 
+    });
+    
+    try {
+      const resp = await fetch(DEBUG_URL, { method: "POST", body: fd });
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      setDebugData(data);
+      setDebugMode(true);
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Debug failed");
+    }
+  };
 
   const submit = async () => {
     if (!allSet) { setError("Please provide all 6 faces (U, R, F, D, L, B)."); return; }
@@ -147,15 +174,94 @@ export default function RubiksPage() {
         </div>
 
         {/* Controls */}
-        <div className="mt-6 flex items-center gap-4">
+        <div className="mt-6 flex items-center gap-4 flex-wrap">
           <button onClick={submit}
                   disabled={!allSet || solving}
                   className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-700">
             {solving ? "Solving…" : "Solve"}
           </button>
+          <button onClick={debugColors}
+                  disabled={!allSet}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-700">
+            Debug Colors
+          </button>
           {!allSet && <span className="text-sm text-neutral-400">Need all 6 faces</span>}
           {error && <span className="text-sm text-red-400">{error}</span>}
         </div>
+
+        {/* Debug Results */}
+        {debugMode && debugData && (
+          <div className="mt-8 rounded-2xl border border-neutral-800 p-4 bg-neutral-900/50">
+            <div className="flex items-center justify-between mb-4">
+              <div className="font-medium">Color Detection Analysis</div>
+              <button onClick={() => setDebugMode(false)} className="text-neutral-400 hover:text-white">✕</button>
+            </div>
+
+            {/* Overall Statistics */}
+            <div className="mb-4 p-3 rounded-lg bg-neutral-800/50">
+              <div className="font-medium mb-2">Overall Statistics</div>
+              <div className="grid md:grid-cols-2 gap-4 text-sm">
+                <div>Status: <span className={debugData.status === 'success' ? 'text-green-400' : 'text-yellow-400'}>{debugData.status}</span></div>
+                <div>Average Confidence: <span className="font-mono">{debugData.overall_statistics.average_confidence}</span></div>
+                <div>Correct Color Counts: <span className="font-mono">{debugData.overall_statistics.colors_with_correct_count}/6</span></div>
+                <div>Correct Center Colors: <span className="font-mono">{debugData.overall_statistics.faces_with_correct_center}/6</span></div>
+              </div>
+            </div>
+
+            {/* Recommendations */}
+            {debugData.recommendations && debugData.recommendations.length > 0 && (
+              <div className="mb-4 p-3 rounded-lg bg-blue-900/30 border border-blue-500/30">
+                <div className="font-medium mb-2 text-blue-300">Recommendations</div>
+                <ul className="text-sm space-y-1">
+                  {debugData.recommendations.map((rec: string, i: number) => (
+                    <li key={i} className="text-blue-200">• {rec}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Color Counts */}
+            <div className="mb-4 p-3 rounded-lg bg-neutral-800/50">
+              <div className="font-medium mb-2">Color Distribution</div>
+              <div className="grid grid-cols-6 gap-2 text-sm">
+                {FACE_ORDER.map(face => (
+                  <div key={face} className={`text-center p-2 rounded ${debugData.total_counts[face] === 9 ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'}`}>
+                    <div className="font-mono font-bold">{face}</div>
+                    <div>{debugData.total_counts[face]}/9</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Detailed Face Analysis */}
+            <div className="space-y-3">
+              {FACE_ORDER.map(face => (
+                <details key={face} className="group">
+                  <summary className="cursor-pointer p-3 rounded-lg bg-neutral-800/50 hover:bg-neutral-800 group-open:rounded-b-none">
+                    <span className="font-medium">{face} Face Analysis</span>
+                    <span className={`ml-2 text-sm ${debugData.face_statistics[face].center_matches_face ? 'text-green-400' : 'text-red-400'}`}>
+                      (Center: {debugData.face_statistics[face].center_color}, 
+                      Confidence: {debugData.face_statistics[face].average_confidence})
+                    </span>
+                  </summary>
+                  <div className="p-3 bg-neutral-800/30 rounded-b-lg">
+                    <div className="grid grid-cols-3 gap-1 mb-3">
+                      {debugData.color_analysis[face].map((tile: any, i: number) => (
+                        <div key={i} className={`p-2 text-xs text-center rounded border ${i === 4 ? 'border-yellow-500' : 'border-neutral-600'}`}>
+                          <div className="font-mono font-bold">{tile.detected_color}</div>
+                          <div className="text-neutral-400">conf: {tile.confidence}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="text-xs text-neutral-400">
+                      Unique colors: {debugData.face_statistics[face].unique_colors.join(', ')}
+                    </div>
+                  </div>
+                </details>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Results */}
         {moves.length > 0 && (
