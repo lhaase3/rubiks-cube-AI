@@ -25,12 +25,27 @@ ROT_Z = str.maketrans({"U": "R", "R": "D", "D": "L", "L": "U", "F": "F", "B": "B
 
 def _compose_tables(a, b):
     """Compose two maketrans tables for face relabeling."""
-    ad = {chr(k): chr(v) for k, v in a.items()}
-    bd = {chr(k): chr(v) for k, v in b.items()}
+    # Convert both tables to string->string format first
+    a_dict = {}
+    for k, v in a.items():
+        key = chr(k) if isinstance(k, int) else k
+        val = chr(v) if isinstance(v, int) else v
+        a_dict[key] = val
+    
+    b_dict = {}
+    for k, v in b.items():
+        key = chr(k) if isinstance(k, int) else k
+        val = chr(v) if isinstance(v, int) else v
+        b_dict[key] = val
+    
+    # Now compose the mappings
     out = {}
     for ch in "URFDLB":
-        mid = bd.get(ch, ch)
-        out[ch] = ad.get(mid, mid)
+        mid = b_dict.get(ch, ch)
+        final = a_dict.get(mid, mid)
+        out[ch] = final
+    
+    # Convert back to ord->ord format for maketrans
     return {ord(k): ord(v) for k, v in out.items()}
 
 def _rotations_sample(n=12):
@@ -75,44 +90,62 @@ def _circular_hue_delta(h1, h2):
 
 def _extract_color_features(img_bgr, patch_frac=0.6):
     """Extract multiple color features for more robust classification."""
-    h, w = img_bgr.shape[:2]
-    ph, pw = int(h * patch_frac), int(w * patch_frac)
-    y0 = (h - ph) // 2
-    x0 = (w - pw) // 2
-    patch = img_bgr[y0:y0 + ph, x0:x0 + pw]
-    
-    # Multiple color spaces for robustness
-    hsv = cv.cvtColor(patch, cv.COLOR_BGR2HSV)
-    lab = cv.cvtColor(patch, cv.COLOR_BGR2LAB)
-    rgb = cv.cvtColor(patch, cv.COLOR_BGR2RGB)
-    
-    # Calculate statistics
-    hsv_mean = np.mean(hsv.reshape(-1, 3), axis=0)
-    lab_mean = np.mean(lab.reshape(-1, 3), axis=0)
-    rgb_mean = np.mean(rgb.reshape(-1, 3), axis=0)
-    
-    # Calculate dominant color using clustering
-    pixels = patch.reshape(-1, 3)
-    
-    # Remove outliers (very dark or very bright pixels)
-    brightness = np.mean(pixels, axis=1)
-    valid_mask = (brightness > 30) & (brightness < 225)
-    if np.sum(valid_mask) > 10:
-        pixels = pixels[valid_mask]
-    
-    # Simple k-means alternative: find most frequent color in quantized space
-    quantized = (pixels // 32) * 32  # Quantize to reduce noise
-    unique_colors, counts = np.unique(quantized.reshape(-1, 3), axis=0, return_counts=True)
-    dominant_bgr = unique_colors[np.argmax(counts)]
-    dominant_hsv = cv.cvtColor(dominant_bgr.reshape(1, 1, 3), cv.COLOR_BGR2HSV)[0, 0]
-    
-    return {
-        'hsv_mean': hsv_mean,
-        'lab_mean': lab_mean,
-        'rgb_mean': rgb_mean,
-        'dominant_hsv': dominant_hsv,
-        'dominant_bgr': dominant_bgr
-    }
+    try:
+        h, w = img_bgr.shape[:2]
+        ph, pw = int(h * patch_frac), int(w * patch_frac)
+        y0 = (h - ph) // 2
+        x0 = (w - pw) // 2
+        patch = img_bgr[y0:y0 + ph, x0:x0 + pw]
+        
+        # Ensure patch is not empty
+        if patch.size == 0:
+            raise ValueError("Empty patch extracted")
+        
+        # Multiple color spaces for robustness
+        hsv = cv.cvtColor(patch, cv.COLOR_BGR2HSV)
+        lab = cv.cvtColor(patch, cv.COLOR_BGR2LAB)
+        rgb = cv.cvtColor(patch, cv.COLOR_BGR2RGB)
+        
+        # Calculate statistics
+        hsv_mean = np.mean(hsv.reshape(-1, 3), axis=0)
+        lab_mean = np.mean(lab.reshape(-1, 3), axis=0)
+        rgb_mean = np.mean(rgb.reshape(-1, 3), axis=0)
+        
+        # Calculate dominant color using clustering
+        pixels = patch.reshape(-1, 3)
+        
+        # Remove outliers (very dark or very bright pixels)
+        brightness = np.mean(pixels, axis=1)
+        valid_mask = (brightness > 30) & (brightness < 225)
+        if np.sum(valid_mask) > 10:
+            pixels = pixels[valid_mask]
+        
+        # Simple k-means alternative: find most frequent color in quantized space
+        quantized = (pixels // 32) * 32  # Quantize to reduce noise
+        unique_colors, counts = np.unique(quantized.reshape(-1, 3), axis=0, return_counts=True)
+        dominant_bgr = unique_colors[np.argmax(counts)]
+        dominant_hsv = cv.cvtColor(dominant_bgr.reshape(1, 1, 3), cv.COLOR_BGR2HSV)[0, 0]
+        
+        return {
+            'hsv_mean': hsv_mean,
+            'lab_mean': lab_mean,
+            'rgb_mean': rgb_mean,
+            'dominant_hsv': dominant_hsv,
+            'dominant_bgr': dominant_bgr
+        }
+    except Exception as e:
+        print(f"Error in _extract_color_features: {e}")
+        # Return fallback features
+        h, w = img_bgr.shape[:2]
+        center_pixel = img_bgr[h//2, w//2]
+        hsv_center = cv.cvtColor(center_pixel.reshape(1, 1, 3), cv.COLOR_BGR2HSV)[0, 0]
+        return {
+            'hsv_mean': hsv_center,
+            'lab_mean': np.array([50, 0, 0]),  # Neutral LAB
+            'rgb_mean': center_pixel,
+            'dominant_hsv': hsv_center,
+            'dominant_bgr': center_pixel
+        }
 
 def _hsv_mean_center_patch(img_bgr, patch_frac=0.4):
     """Legacy function - now uses enhanced feature extraction."""
@@ -344,7 +377,14 @@ def _find_face_warp(img_bgr, out_size=600):
 def _slice_face_into_9(warped):
     H, W = warped.shape[:2]
     h, w = H // 3, W // 3
-    return [warped[r * h:(r + 1) * h, c * w:(c + 1) * w] for r in range(3) for c in range(3)]
+    tiles = []
+    for r in range(3):
+        for c in range(3):
+            y1, y2 = r * h, (r + 1) * h
+            x1, x2 = c * w, (c + 1) * w
+            tile = warped[y1:y2, x1:x2]
+            tiles.append(tile)
+    return tiles
 
 # ----------------------------
 # Color calibration + classification
@@ -362,38 +402,67 @@ def _classify_tile(hsv, centroids):
 
 def _build_cube_string(face_imgs, centroids):
     """Build cube string with enhanced feature extraction and validation."""
+    print("Starting cube string building...")
+    
     # First pass: get enhanced centroids
+    print("Getting enhanced centroids...")
     centroids_enhanced, all_features = _calibrate_centroids_enhanced(face_imgs)
+    print(f"Enhanced centroids obtained for faces: {list(centroids_enhanced.keys())}")
     
     seq = []
     face_sequences = {}
     confidence_scores = {}
     
     for face in FACE_ORDER:
-        warped = _find_face_warp(face_imgs[face])
-        tiles = _slice_face_into_9(warped)
-        face_seq = []
-        face_confidences = []
-        
-        for i, tile in enumerate(tiles):
-            features = _extract_color_features(tile)
-            detected_color, confidence = _classify_tile_enhanced(features, centroids_enhanced, all_features)
-            face_seq.append(detected_color)
-            face_confidences.append(confidence)
-            seq.append(detected_color)
-        
-        face_sequences[face] = face_seq
-        confidence_scores[face] = face_confidences
-        
-        # Validate center sticker matches expected face color
-        center_color = face_seq[4]  # Center tile should match face name
-        center_confidence = face_confidences[4]
-        
-        if center_color != face:
-            print(f"Warning: {face} face center sticker detected as {center_color} "
-                  f"(confidence: {center_confidence:.2f}). This might indicate incorrect face labeling.")
+        print(f"Processing face {face}...")
+        try:
+            warped = _find_face_warp(face_imgs[face])
+            print(f"Face {face} warped to shape: {warped.shape}")
+            
+            tiles = _slice_face_into_9(warped)
+            print(f"Face {face} sliced into {len(tiles)} tiles")
+            
+            face_seq = []
+            face_confidences = []
+            
+            for i, tile in enumerate(tiles):
+                try:
+                    print(f"Processing tile {i} of face {face}, tile shape: {tile.shape}")
+                    features = _extract_color_features(tile)
+                    detected_color, confidence = _classify_tile_enhanced(features, centroids_enhanced, all_features)
+                    face_seq.append(detected_color)
+                    face_confidences.append(confidence)
+                    seq.append(detected_color)
+                    print(f"Tile {i}: {detected_color} (confidence: {confidence:.3f})")
+                except Exception as e:
+                    print(f"Error processing tile {i} of face {face}: {e}")
+                    # Use fallback classification
+                    hsv = _hsv_mean_center_patch(tile)
+                    detected_color = _classify_tile(hsv, centroids_enhanced)
+                    face_seq.append(detected_color)
+                    face_confidences.append(0.1)  # Low confidence for fallback
+                    seq.append(detected_color)
+                    print(f"Fallback tile {i}: {detected_color}")
+            
+            face_sequences[face] = face_seq
+            confidence_scores[face] = face_confidences
+            
+            # Validate center sticker matches expected face color
+            center_color = face_seq[4]  # Center tile should match face name
+            center_confidence = face_confidences[4]
+            
+            if center_color != face:
+                print(f"Warning: {face} face center sticker detected as {center_color} "
+                      f"(confidence: {center_confidence:.2f}). This might indicate incorrect face labeling.")
+                      
+        except Exception as e:
+            print(f"ERROR processing face {face}: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
     
     cube = "".join(seq)
+    print(f"Generated cube string: {cube}")
     
     # Calculate average confidence per face
     avg_confidences = {}
@@ -422,14 +491,17 @@ def _build_cube_string(face_imgs, centroids):
             if low_confidence_faces:
                 confidence_info = f"\nLow confidence detections: {', '.join(low_confidence_faces)}"
             
-            raise ValueError(
+            error_msg = (
                 f"Count mismatch for {f}: got {cube.count(f)} but need exactly 9.\n"
                 f"Breakdown: {', '.join(error_details)}\n"
                 f"All color counts: {color_counts}{confidence_info}\n"
                 f"This usually means lighting issues or similar colors being confused. "
                 f"Try retaking photos with better lighting, ensuring the cube face fills most of the frame."
             )
+            print(f"CUBE VALIDATION ERROR: {error_msg}")
+            raise ValueError(error_msg)
     
+    print("Cube string validation passed!")
     return cube
 
 # ----------------------------
@@ -589,34 +661,61 @@ def solve_endpoint():
     Returns: {"moves": ["R", "U", "R'", ...], "count": N}
     """
     try:
+        print("=== SOLVE REQUEST RECEIVED ===")
+        print(f"Files in request: {list(request.files.keys())}")
+        
         # 1) Read images from form
         imgs = {}
         for f in FACE_ORDER:
             file = request.files.get(f)
             if not file:
-                return (f"Missing face {f}", 400)
+                error_msg = f"Missing face {f}"
+                print(f"ERROR: {error_msg}")
+                return (error_msg, 400)
+            
+            print(f"Processing face {f}: {file.filename}, size: {file.content_length}")
             file_bytes = np.frombuffer(file.read(), np.uint8)
             img = cv.imdecode(file_bytes, cv.IMREAD_COLOR)
             if img is None:
-                return (f"Failed to decode image for face {f}", 400)
+                error_msg = f"Failed to decode image for face {f}"
+                print(f"ERROR: {error_msg}")
+                return (error_msg, 400)
+            print(f"Successfully decoded face {f}: shape {img.shape}")
             imgs[f] = img
 
+        print("All images loaded successfully")
+        
         # 2) Calibrate & parse cube
+        print("Starting calibration...")
         cents = _calibrate_centroids(imgs)
+        print(f"Calibration complete: {list(cents.keys())}")
+        
+        print("Building cube string...")
         cube = _build_cube_string(imgs, cents)
+        print(f"Cube string built: {cube[:20]}... (length: {len(cube)})")
 
         # 3) Solve
+        print("Solving cube...")
         solution = _solve_best_orientation(cube)
         moves = solution.split()
+        print(f"Solution found: {len(moves)} moves")
         return jsonify({"moves": moves, "count": len(moves)})
 
     except AssertionError as e:
-        return (f"Invalid cube: {e}", 400)
+        error_msg = f"Invalid cube: {e}"
+        print(f"ASSERTION ERROR: {error_msg}")
+        return (error_msg, 400)
     except ValueError as e:
-        return (str(e), 400)
+        error_msg = str(e)
+        print(f"VALUE ERROR: {error_msg}")
+        return (error_msg, 400)
     except Exception as e:
-        # For debugging; in production, log more and return generic error
-        return (f"Error: {e}", 400)
+        import traceback
+        error_msg = f"Unexpected error: {e}"
+        print(f"EXCEPTION: {error_msg}")
+        print("TRACEBACK:")
+        traceback.print_exc()
+        return (error_msg, 400)
 
 # ----------------------------
 # Main

@@ -202,9 +202,9 @@ export default function RubiksPage() {
               <div className="font-medium mb-2">Overall Statistics</div>
               <div className="grid md:grid-cols-2 gap-4 text-sm">
                 <div>Status: <span className={debugData.status === 'success' ? 'text-green-400' : 'text-yellow-400'}>{debugData.status}</span></div>
-                <div>Average Confidence: <span className="font-mono">{debugData.overall_statistics.average_confidence}</span></div>
-                <div>Correct Color Counts: <span className="font-mono">{debugData.overall_statistics.colors_with_correct_count}/6</span></div>
-                <div>Correct Center Colors: <span className="font-mono">{debugData.overall_statistics.faces_with_correct_center}/6</span></div>
+                <div>Average Confidence: <span className="font-mono">{debugData.overall_statistics?.average_confidence || 'N/A'}</span></div>
+                <div>Correct Color Counts: <span className="font-mono">{debugData.overall_statistics?.colors_with_correct_count || 0}/6</span></div>
+                <div>Correct Center Colors: <span className="font-mono">{debugData.overall_statistics?.faces_with_correct_center || 0}/6</span></div>
               </div>
             </div>
 
@@ -225,9 +225,9 @@ export default function RubiksPage() {
               <div className="font-medium mb-2">Color Distribution</div>
               <div className="grid grid-cols-6 gap-2 text-sm">
                 {FACE_ORDER.map(face => (
-                  <div key={face} className={`text-center p-2 rounded ${debugData.total_counts[face] === 9 ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'}`}>
+                  <div key={face} className={`text-center p-2 rounded ${(debugData.total_counts?.[face] || 0) === 9 ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'}`}>
                     <div className="font-mono font-bold">{face}</div>
-                    <div>{debugData.total_counts[face]}/9</div>
+                    <div>{debugData.total_counts?.[face] || 0}/9</div>
                   </div>
                 ))}
               </div>
@@ -239,22 +239,22 @@ export default function RubiksPage() {
                 <details key={face} className="group">
                   <summary className="cursor-pointer p-3 rounded-lg bg-neutral-800/50 hover:bg-neutral-800 group-open:rounded-b-none">
                     <span className="font-medium">{face} Face Analysis</span>
-                    <span className={`ml-2 text-sm ${debugData.face_statistics[face].center_matches_face ? 'text-green-400' : 'text-red-400'}`}>
-                      (Center: {debugData.face_statistics[face].center_color}, 
-                      Confidence: {debugData.face_statistics[face].average_confidence})
+                    <span className={`ml-2 text-sm ${debugData.face_statistics?.[face]?.center_matches_face ? 'text-green-400' : 'text-red-400'}`}>
+                      (Center: {debugData.face_statistics?.[face]?.center_color || 'N/A'}, 
+                      Confidence: {debugData.face_statistics?.[face]?.average_confidence || 'N/A'})
                     </span>
                   </summary>
                   <div className="p-3 bg-neutral-800/30 rounded-b-lg">
                     <div className="grid grid-cols-3 gap-1 mb-3">
-                      {debugData.color_analysis[face].map((tile: any, i: number) => (
+                      {(debugData.color_analysis?.[face] || []).map((tile: any, i: number) => (
                         <div key={i} className={`p-2 text-xs text-center rounded border ${i === 4 ? 'border-yellow-500' : 'border-neutral-600'}`}>
-                          <div className="font-mono font-bold">{tile.detected_color}</div>
-                          <div className="text-neutral-400">conf: {tile.confidence}</div>
+                          <div className="font-mono font-bold">{tile.detected_color || 'N/A'}</div>
+                          <div className="text-neutral-400">conf: {tile.confidence || 'N/A'}</div>
                         </div>
                       ))}
                     </div>
                     <div className="text-xs text-neutral-400">
-                      Unique colors: {debugData.face_statistics[face].unique_colors.join(', ')}
+                      Unique colors: {debugData.face_statistics?.[face]?.unique_colors?.join(', ') || 'N/A'}
                     </div>
                   </div>
                 </details>
@@ -265,16 +265,42 @@ export default function RubiksPage() {
 
         {/* Results */}
         {moves.length > 0 && (
-          <div className="mt-8 rounded-2xl border border-neutral-800 p-4 bg-neutral-900/50">
-            <div className="font-medium mb-2">Solution ({moves.length} moves)</div>
-            <ol className="list-decimal ml-6 grid md:grid-cols-2 gap-x-8">
-              {moves.map((m, i) => (
-                <li key={i} className="py-1">
-                  <span className="inline-block w-10 font-mono">{m}</span>
-                  <span className="text-neutral-400 ml-3">{describeMove(m)}</span>
-                </li>
-              ))}
-            </ol>
+          <div className="mt-8 space-y-6">
+            {/* 3D Animation */}
+            <div className="rounded-2xl border border-neutral-800 p-4 bg-neutral-900/50">
+              <div className="font-medium mb-4">3D Cube Solver Animation</div>
+              
+              {/* 3D Cube Viewer */}
+              <div className="h-[500px]">
+                <CubeViewer 
+                  moves={moves} 
+                  onMoveChange={(moveIndex) => setCurrentMoveIndex(moveIndex)}
+                />
+              </div>
+            </div>
+
+            {/* Move List */}
+            <div className="rounded-2xl border border-neutral-800 p-4 bg-neutral-900/50">
+              <div className="font-medium mb-2">Solution Steps ({moves.length} moves)</div>
+              <div className="text-sm text-neutral-400 mb-4">
+                Click on any move below to jump to that step in the animation
+              </div>
+              <ol className="list-decimal ml-6 grid md:grid-cols-2 gap-x-8">
+                {moves.map((m, i) => (
+                  <li 
+                    key={i} 
+                    className={`py-2 cursor-pointer rounded px-3 -mx-3 transition-colors hover:bg-neutral-800/50 ${
+                      i === currentMoveIndex ? 'bg-emerald-900/50 text-emerald-300 border-l-2 border-emerald-500' : 
+                      i < currentMoveIndex ? 'text-neutral-500' : ''
+                    }`}
+                    onClick={() => setCurrentMoveIndex(i)}
+                  >
+                    <span className="inline-block w-10 font-mono font-bold">{m}</span>
+                    <span className="text-neutral-400 ml-3">{describeMove(m)}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
           </div>
         )}
       </div>
