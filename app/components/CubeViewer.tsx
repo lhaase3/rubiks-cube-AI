@@ -158,6 +158,9 @@ const RubiksCube = forwardRef<CubeRef, { initialCubeState?: string }>((props, re
   useEffect(() => {
     if (groupRef.current && !animatorRef.current) {
       animatorRef.current = new CubeAnimator(groupRef.current, cubeState);
+    } else if (animatorRef.current) {
+      // Sync animator state when cube state changes externally
+      animatorRef.current.updateState(cubeState);
     }
   }, [cubeState]);
 
@@ -172,6 +175,9 @@ const RubiksCube = forwardRef<CubeRef, { initialCubeState?: string }>((props, re
     
     try {
       await animatorRef.current.animateMove(move);
+      // Update cube state to match the animated result
+      const newState = animatorRef.current.getCubeState();
+      setCubeState(newState);
     } catch (error) {
       console.error('Animation error:', error);
     } finally {
