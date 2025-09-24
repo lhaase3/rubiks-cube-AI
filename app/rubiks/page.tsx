@@ -34,9 +34,15 @@ export default function RubiksPage() {
   const [currentMoveIndex, setCurrentMoveIndex] = useState(-1);
   const [debugMode, setDebugMode] = useState(false);
   const [debugData, setDebugData] = useState<any>(null);
+  const [initialCubeState, setInitialCubeState] = useState<string>("");
 
   const SOLVER_URL = process.env.NEXT_PUBLIC_SOLVER_URL || "http://localhost:5001/solve";
   const DEBUG_URL = process.env.NEXT_PUBLIC_DEBUG_URL || "http://localhost:5001/debug-colors";
+
+  // Debug logging for state changes
+  useEffect(() => {
+    console.log("initialCubeState changed to:", initialCubeState);
+  }, [initialCubeState]);
 
   // Start/stop webcam when modal opens/closes
   useEffect(() => {
@@ -115,9 +121,27 @@ export default function RubiksPage() {
     }
   };
 
+  const testCube = async () => {
+    try {
+      console.log("Test cube button clicked!");
+      const resp = await fetch("http://localhost:5001/test-cube");
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      console.log("Test cube response:", data);
+      alert(`Test cube response: ${JSON.stringify(data).slice(0, 100)}...`);
+      setMoves(data.moves || []);
+      setInitialCubeState(data.cube_string || data.initial_state || "");
+      console.log("Set initialCubeState to:", data.cube_string || data.initial_state);
+      setError("");
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Test failed");
+    }
+  };
+
   const submit = async () => {
     if (!allSet) { setError("Please provide all 6 faces (U, R, F, D, L, B)."); return; }
-    setSolving(true); setError(""); setMoves([]);
+    setSolving(true); setError(""); setMoves([]); setInitialCubeState("");
     const fd = new FormData();
     FACE_ORDER.forEach(face => { if (faces[face].file) fd.append(face, faces[face].file as File); });
     try {
@@ -125,6 +149,7 @@ export default function RubiksPage() {
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
       setMoves(data.moves || []);
+      setInitialCubeState(data.initial_state || "");
     } catch (e: any) {
       console.error(e);
       setError(e?.message || "Solve failed");
@@ -185,6 +210,10 @@ export default function RubiksPage() {
                   className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-700">
             Debug Colors
           </button>
+          <button onClick={testCube}
+                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500">
+            Test Cube
+          </button>
           {!allSet && <span className="text-sm text-neutral-400">Need all 6 faces</span>}
           {error && <span className="text-sm text-red-400">{error}</span>}
         </div>
@@ -202,9 +231,9 @@ export default function RubiksPage() {
               <div className="font-medium mb-2">Overall Statistics</div>
               <div className="grid md:grid-cols-2 gap-4 text-sm">
                 <div>Status: <span className={debugData.status === 'success' ? 'text-green-400' : 'text-yellow-400'}>{debugData.status}</span></div>
-                <div>Average Confidence: <span className="font-mono">{debugData.overall_statistics.average_confidence}</span></div>
-                <div>Correct Color Counts: <span className="font-mono">{debugData.overall_statistics.colors_with_correct_count}/6</span></div>
-                <div>Correct Center Colors: <span className="font-mono">{debugData.overall_statistics.faces_with_correct_center}/6</span></div>
+                <div>Average Confidence: <span className="font-mono">{debugData.overall_statistics?.average_confidence || 'N/A'}</span></div>
+                <div>Correct Color Counts: <span className="font-mono">{debugData.overall_statistics?.colors_with_correct_count || 0}/6</span></div>
+                <div>Correct Center Colors: <span className="font-mono">{debugData.overall_statistics?.faces_with_correct_center || 0}/6</span></div>
               </div>
             </div>
 
@@ -225,9 +254,9 @@ export default function RubiksPage() {
               <div className="font-medium mb-2">Color Distribution</div>
               <div className="grid grid-cols-6 gap-2 text-sm">
                 {FACE_ORDER.map(face => (
-                  <div key={face} className={`text-center p-2 rounded ${debugData.total_counts[face] === 9 ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'}`}>
+                  <div key={face} className={`text-center p-2 rounded ${(debugData.total_counts?.[face] || 0) === 9 ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'}`}>
                     <div className="font-mono font-bold">{face}</div>
-                    <div>{debugData.total_counts[face]}/9</div>
+                    <div>{debugData.total_counts?.[face] || 0}/9</div>
                   </div>
                 ))}
               </div>
@@ -239,22 +268,22 @@ export default function RubiksPage() {
                 <details key={face} className="group">
                   <summary className="cursor-pointer p-3 rounded-lg bg-neutral-800/50 hover:bg-neutral-800 group-open:rounded-b-none">
                     <span className="font-medium">{face} Face Analysis</span>
-                    <span className={`ml-2 text-sm ${debugData.face_statistics[face].center_matches_face ? 'text-green-400' : 'text-red-400'}`}>
-                      (Center: {debugData.face_statistics[face].center_color}, 
-                      Confidence: {debugData.face_statistics[face].average_confidence})
+                    <span className={`ml-2 text-sm ${debugData.face_statistics?.[face]?.center_matches_face ? 'text-green-400' : 'text-red-400'}`}>
+                      (Center: {debugData.face_statistics?.[face]?.center_color || 'N/A'}, 
+                      Confidence: {debugData.face_statistics?.[face]?.average_confidence || 'N/A'})
                     </span>
                   </summary>
                   <div className="p-3 bg-neutral-800/30 rounded-b-lg">
                     <div className="grid grid-cols-3 gap-1 mb-3">
-                      {debugData.color_analysis[face].map((tile: any, i: number) => (
+                      {(debugData.color_analysis?.[face] || []).map((tile: any, i: number) => (
                         <div key={i} className={`p-2 text-xs text-center rounded border ${i === 4 ? 'border-yellow-500' : 'border-neutral-600'}`}>
-                          <div className="font-mono font-bold">{tile.detected_color}</div>
-                          <div className="text-neutral-400">conf: {tile.confidence}</div>
+                          <div className="font-mono font-bold">{tile.detected_color || 'N/A'}</div>
+                          <div className="text-neutral-400">conf: {tile.confidence || 'N/A'}</div>
                         </div>
                       ))}
                     </div>
                     <div className="text-xs text-neutral-400">
-                      Unique colors: {debugData.face_statistics[face].unique_colors.join(', ')}
+                      Unique colors: {debugData.face_statistics?.[face]?.unique_colors?.join(', ') || 'N/A'}
                     </div>
                   </div>
                 </details>
@@ -264,17 +293,50 @@ export default function RubiksPage() {
         )}
 
         {/* Results */}
-        {moves.length > 0 && (
-          <div className="mt-8 rounded-2xl border border-neutral-800 p-4 bg-neutral-900/50">
-            <div className="font-medium mb-2">Solution ({moves.length} moves)</div>
-            <ol className="list-decimal ml-6 grid md:grid-cols-2 gap-x-8">
-              {moves.map((m, i) => (
-                <li key={i} className="py-1">
-                  <span className="inline-block w-10 font-mono">{m}</span>
-                  <span className="text-neutral-400 ml-3">{describeMove(m)}</span>
-                </li>
-              ))}
-            </ol>
+        {(moves.length > 0 || initialCubeState) && (
+          <div className="mt-8 space-y-6">
+            {/* 3D Animation */}
+            <div className="rounded-2xl border border-neutral-800 p-4 bg-neutral-900/50">
+              <div className="font-medium mb-4">
+                3D Cube Solver Animation
+                <div className="text-xs text-neutral-400 mt-1">
+                  Current state: {initialCubeState ? `"${initialCubeState.slice(0, 20)}..."` : "No cube state"}
+                </div>
+              </div>
+              
+              {/* 3D Cube Viewer */}
+              <div className="h-[500px]">
+                <CubeViewer 
+                  key={`cube-${initialCubeState}`} // Force complete re-render when cube state changes
+                  moves={moves} 
+                  onMoveChange={(moveIndex) => setCurrentMoveIndex(moveIndex)}
+                  initialCubeState={initialCubeState}
+                />
+              </div>
+            </div>
+
+            {/* Move List */}
+            <div className="rounded-2xl border border-neutral-800 p-4 bg-neutral-900/50">
+              <div className="font-medium mb-2">Solution Steps ({moves.length} moves)</div>
+              <div className="text-sm text-neutral-400 mb-4">
+                Click on any move below to jump to that step in the animation
+              </div>
+              <ol className="list-decimal ml-6 grid md:grid-cols-2 gap-x-8">
+                {moves.map((m, i) => (
+                  <li 
+                    key={i} 
+                    className={`py-2 cursor-pointer rounded px-3 -mx-3 transition-colors hover:bg-neutral-800/50 ${
+                      i === currentMoveIndex ? 'bg-emerald-900/50 text-emerald-300 border-l-2 border-emerald-500' : 
+                      i < currentMoveIndex ? 'text-neutral-500' : ''
+                    }`}
+                    onClick={() => setCurrentMoveIndex(i)}
+                  >
+                    <span className="inline-block w-10 font-mono font-bold">{m}</span>
+                    <span className="text-neutral-400 ml-3">{describeMove(m)}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
           </div>
         )}
       </div>

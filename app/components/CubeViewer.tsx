@@ -5,38 +5,121 @@ import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { CubeAnimator, validateMove, describeMoveDetailed } from './CubeAnimator';
 
-// Face colors for a standard Rubik's cube
+// Face colors for a standard Rubik's cube - must match server color detection
 const FACE_COLORS = {
-  U: '#ffffff', // White - Up
-  D: '#ffff00', // Yellow - Down  
-  F: '#00ff00', // Green - Front
-  B: '#0000ff', // Blue - Back
-  R: '#ff0000', // Red - Right
-  L: '#ffa500', // Orange - Left
+  U: '#ffffff', // White - Up (matches server WHITE detection)
+  D: '#ffff00', // Yellow - Down (matches server YELLOW detection)
+  F: '#00ff00', // Green - Front (matches server GREEN detection)
+  B: '#0000ff', // Blue - Back (matches server BLUE detection)
+  R: '#ff0000', // Red - Right (matches server RED detection)
+  L: '#ffa500', // Orange - Left (matches server ORANGE detection)
 };
+
+// CubeViewer.tsx
+function cubeStringToState(cubeString: string): Record<string,string>[][][] {
+  if (!cubeString || cubeString.length !== 54) return initializeSolvedCube();
+
+  const cube: Record<string, string>[][][] =
+    Array.from({length:3},()=>Array.from({length:3},()=>Array.from({length:3},()=>({} as Record<string,string>))));
+
+  // Match the server's color detection mapping
+  const FACE_COLORS = { 
+    U:"#ffffff", // White - matches server WHITE detection
+    D:"#ffff00", // Yellow - matches server YELLOW detection  
+    L:"#ffa500", // Orange - matches server ORANGE detection
+    R:"#ff0000", // Red - matches server RED detection
+    F:"#00ff00", // Green - matches server GREEN detection
+    B:"#0000ff"  // Blue - matches server BLUE detection
+  } as const;
+  const get = (s:string,r:number,c:number)=>s[r*3+c];
+
+  const blocks = ["U","R","F","D","L","B"] as const;
+
+  const paint = (face: typeof blocks[number], chunk: string) => {
+    for (let r=0;r<3;r++){
+      for (let c=0;c<3;c++){
+        const ch = get(chunk,r,c) as keyof typeof FACE_COLORS;
+        const color = FACE_COLORS[ch] ?? "#888";
+        if (face==="U"){ const x=c, y=2, z=2-r; cube[x][y][z].U=color; }
+        if (face==="D"){ const x=c, y=0, z=r;   cube[x][y][z].D=color; }
+        if (face==="F"){ const x=c, y=2-r, z=2; cube[x][y][z].F=color; }
+        if (face==="B"){ const x=2-c, y=2-r, z=0; cube[x][y][z].B=color; }
+        if (face==="R"){ const x=2, y=2-r, z=c; cube[x][y][z].R=color; }
+        if (face==="L"){ const x=0, y=2-r, z=2-c; cube[x][y][z].L=color; }
+      }
+    }
+  };
+
+  blocks.forEach((f,i)=>paint(f, cubeString.slice(i*9, i*9+9)));
+  return cube;
+}
+
+
+function initializeSolvedCube(): Record<string, string>[][][] {
+  const cube: Record<string, string>[][][] = [];
+  for (let x = 0; x < 3; x++) {
+    cube[x] = [];
+    for (let y = 0; y < 3; y++) {
+      cube[x][y] = [];
+      for (let z = 0; z < 3; z++) {
+        const colors: Record<string, string> = {};
+        
+        // Only show colors on outer faces
+        if (x === 0) colors.L = FACE_COLORS.L; // Left face
+        if (x === 2) colors.R = FACE_COLORS.R; // Right face
+        if (y === 0) colors.D = FACE_COLORS.D; // Down face
+        if (y === 2) colors.U = FACE_COLORS.U; // Up face
+        if (z === 0) colors.B = FACE_COLORS.B; // Back face
+        if (z === 2) colors.F = FACE_COLORS.F; // Front face
+        
+        cube[x][y][z] = colors;
+      }
+    }
+  }
+  return cube;
+}
 
 // Individual cube piece component
 function CubePiece({ position, colors }: { position: [number, number, number], colors: Record<string, string> }) {
   const meshRef = useRef<THREE.Mesh>(null);
   
+  // Debug: log colors for a few key pieces
+  const [x, y, z] = position.map(p => Math.round(p + 1.05)); // Convert back to grid coords
+  if ((x === 1 && y === 1 && z === 1) || // center piece
+      (x === 1 && y === 2 && z === 1) || // top center
+      (x === 2 && y === 1 && z === 1)) { // right center
+    console.log(`🟦 CubePiece[${x},${y},${z}]:`, colors);
+  }
+  
   // Create materials for each face
   const materials = useMemo(() => {
-    return [
-      new THREE.MeshLambertMaterial({ color: colors.R || '#000000' }), // Right (+X)
-      new THREE.MeshLambertMaterial({ color: colors.L || '#000000' }), // Left (-X)
-      new THREE.MeshLambertMaterial({ color: colors.U || '#000000' }), // Top (+Y)
-      new THREE.MeshLambertMaterial({ color: colors.D || '#000000' }), // Bottom (-Y)
-      new THREE.MeshLambertMaterial({ color: colors.F || '#000000' }), // Front (+Z)
-      new THREE.MeshLambertMaterial({ color: colors.B || '#000000' }), // Back (-Z)
+    const mats = [
+      new THREE.MeshLambertMaterial({ color: colors.R || '#333333' }), // Right (+X)
+      new THREE.MeshLambertMaterial({ color: colors.L || '#333333' }), // Left (-X)
+      new THREE.MeshLambertMaterial({ color: colors.U || '#333333' }), // Top (+Y)
+      new THREE.MeshLambertMaterial({ color: colors.D || '#333333' }), // Bottom (-Y)
+      new THREE.MeshLambertMaterial({ color: colors.F || '#333333' }), // Front (+Z)
+      new THREE.MeshLambertMaterial({ color: colors.B || '#333333' }), // Back (-Z)
     ];
-  }, [colors]);
+    
+    // Debug: log material colors for key pieces
+    if ((x === 1 && y === 2 && z === 1)) { // top center
+      console.log(`🎨 Materials for top center piece:`, {
+        R: colors.R || '#333333',
+        L: colors.L || '#333333', 
+        U: colors.U || '#333333',
+        D: colors.D || '#333333',
+        F: colors.F || '#333333',
+        B: colors.B || '#333333'
+      });
+    }
+    
+    return mats;
+  }, [colors, x, y, z]);
 
   return (
-    <mesh ref={meshRef} position={position}>
+    <mesh ref={meshRef} position={position} material={materials}>
       <boxGeometry args={[0.95, 0.95, 0.95]} />
-      {materials.map((material, index) => (
-        <primitive key={index} object={material} attach={`material-${index}`} />
-      ))}
     </mesh>
   );
 }
@@ -47,42 +130,39 @@ export interface CubeRef {
   reset: () => void;
 }
 
-const RubiksCube = forwardRef<CubeRef>((props, ref) => {
+const RubiksCube = forwardRef<CubeRef, { initialCubeState?: string }>((props, ref) => {
   const groupRef = useRef<THREE.Group>(null);
-  const [cubeState, setCubeState] = useState<Record<string, string>[][][]>(() => initializeCube());
+  const [cubeState, setCubeState] = useState<Record<string, string>[][][]>(() => 
+    props.initialCubeState ? cubeStringToState(props.initialCubeState) : initializeSolvedCube()
+  );
   const [isAnimating, setIsAnimating] = useState(false);
   const animatorRef = useRef<CubeAnimator | null>(null);
+
+  // Update cube state when initialCubeState prop changes
+  useEffect(() => {
+    console.log("CubeViewer: initialCubeState prop changed:", props.initialCubeState);
+    if (props.initialCubeState && props.initialCubeState.length === 54) {
+      console.log("CubeViewer: Valid cube string, converting to state");
+      const newState = cubeStringToState(props.initialCubeState);
+      console.log("CubeViewer: Setting new cube state:", newState);
+      setCubeState(newState);
+      if (animatorRef.current) {
+        animatorRef.current.reset(newState);
+      }
+    } else {
+      console.log("CubeViewer: Invalid or empty cube string, using solved cube");
+    }
+  }, [props.initialCubeState]);
 
   // Initialize animator when group is ready
   useEffect(() => {
     if (groupRef.current && !animatorRef.current) {
       animatorRef.current = new CubeAnimator(groupRef.current, cubeState);
+    } else if (animatorRef.current) {
+      // Sync animator state when cube state changes externally
+      animatorRef.current.updateState(cubeState);
     }
   }, [cubeState]);
-
-  function initializeCube(): Record<string, string>[][][] {
-    const cube: Record<string, string>[][][] = [];
-    for (let x = 0; x < 3; x++) {
-      cube[x] = [];
-      for (let y = 0; y < 3; y++) {
-        cube[x][y] = [];
-        for (let z = 0; z < 3; z++) {
-          const colors: Record<string, string> = {};
-          
-          // Only show colors on outer faces
-          if (x === 0) colors.L = FACE_COLORS.L; // Left face
-          if (x === 2) colors.R = FACE_COLORS.R; // Right face
-          if (y === 0) colors.D = FACE_COLORS.D; // Down face
-          if (y === 2) colors.U = FACE_COLORS.U; // Up face
-          if (z === 0) colors.B = FACE_COLORS.B; // Back face
-          if (z === 2) colors.F = FACE_COLORS.F; // Front face
-          
-          cube[x][y][z] = colors;
-        }
-      }
-    }
-    return cube;
-  }
 
   const animateMove = async (move: string): Promise<void> => {
     if (isAnimating || !animatorRef.current) return;
@@ -95,6 +175,9 @@ const RubiksCube = forwardRef<CubeRef>((props, ref) => {
     
     try {
       await animatorRef.current.animateMove(move);
+      // Update cube state to match the animated result
+      const newState = animatorRef.current.getCubeState();
+      setCubeState(newState);
     } catch (error) {
       console.error('Animation error:', error);
     } finally {
@@ -104,7 +187,9 @@ const RubiksCube = forwardRef<CubeRef>((props, ref) => {
 
   const reset = () => {
     if (animatorRef.current) {
-      const initialState = initializeCube();
+      const initialState = props.initialCubeState ? 
+        cubeStringToState(props.initialCubeState) : 
+        initializeSolvedCube();
       setCubeState(initialState);
       animatorRef.current.reset(initialState);
     }
@@ -143,7 +228,10 @@ const RubiksCube = forwardRef<CubeRef>((props, ref) => {
 RubiksCube.displayName = 'RubiksCube';
 
 // Scene component with lighting and camera
-function CubeScene({ cubeRef }: { cubeRef: React.RefObject<CubeRef> }) {
+function CubeScene({ cubeRef, initialCubeState }: { 
+  cubeRef: React.RefObject<CubeRef>; 
+  initialCubeState?: string;
+}) {
   return (
     <>
       {/* Enhanced lighting setup */}
@@ -169,7 +257,7 @@ function CubeScene({ cubeRef }: { cubeRef: React.RefObject<CubeRef> }) {
       />
       
       {/* The cube */}
-      <RubiksCube ref={cubeRef} />
+      <RubiksCube ref={cubeRef} initialCubeState={initialCubeState} />
       
       {/* Background gradient effect */}
       <mesh position={[0, 0, -8]} scale={20}>
@@ -183,11 +271,18 @@ function CubeScene({ cubeRef }: { cubeRef: React.RefObject<CubeRef> }) {
 // Main component that wraps everything
 export default function CubeViewer({ 
   moves = [], 
-  onMoveChange 
+  onMoveChange,
+  initialCubeState 
 }: { 
   moves?: string[]; 
   onMoveChange?: (currentMove: number) => void;
+  initialCubeState?: string;
 }) {
+  console.log("🎲 CubeViewer: Component rendered with props:", { 
+    moves: moves.length, 
+    initialCubeState: initialCubeState?.slice(0, 20) + "..." 
+  });
+  
   const cubeRef = useRef<CubeRef>(null);
   const [currentMoveIndex, setCurrentMoveIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -232,7 +327,7 @@ export default function CubeViewer({
           gl={{ antialias: true, alpha: true }}
           shadows
         >
-          <CubeScene cubeRef={cubeRef} />
+          <CubeScene cubeRef={cubeRef} initialCubeState={initialCubeState} />
         </Canvas>
       </div>
       
