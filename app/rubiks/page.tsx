@@ -34,9 +34,15 @@ export default function RubiksPage() {
   const [currentMoveIndex, setCurrentMoveIndex] = useState(-1);
   const [debugMode, setDebugMode] = useState(false);
   const [debugData, setDebugData] = useState<any>(null);
+  const [initialCubeState, setInitialCubeState] = useState<string>("");
 
   const SOLVER_URL = process.env.NEXT_PUBLIC_SOLVER_URL || "http://localhost:5001/solve";
   const DEBUG_URL = process.env.NEXT_PUBLIC_DEBUG_URL || "http://localhost:5001/debug-colors";
+
+  // Debug logging for state changes
+  useEffect(() => {
+    console.log("initialCubeState changed to:", initialCubeState);
+  }, [initialCubeState]);
 
   // Start/stop webcam when modal opens/closes
   useEffect(() => {
@@ -115,9 +121,27 @@ export default function RubiksPage() {
     }
   };
 
+  const testCube = async () => {
+    try {
+      console.log("Test cube button clicked!");
+      const resp = await fetch("http://localhost:5001/test-cube");
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      console.log("Test cube response:", data);
+      alert(`Test cube response: ${JSON.stringify(data).slice(0, 100)}...`);
+      setMoves(data.moves || []);
+      setInitialCubeState(data.cube_string || data.initial_state || "");
+      console.log("Set initialCubeState to:", data.cube_string || data.initial_state);
+      setError("");
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Test failed");
+    }
+  };
+
   const submit = async () => {
     if (!allSet) { setError("Please provide all 6 faces (U, R, F, D, L, B)."); return; }
-    setSolving(true); setError(""); setMoves([]);
+    setSolving(true); setError(""); setMoves([]); setInitialCubeState("");
     const fd = new FormData();
     FACE_ORDER.forEach(face => { if (faces[face].file) fd.append(face, faces[face].file as File); });
     try {
@@ -125,6 +149,7 @@ export default function RubiksPage() {
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
       setMoves(data.moves || []);
+      setInitialCubeState(data.initial_state || "");
     } catch (e: any) {
       console.error(e);
       setError(e?.message || "Solve failed");
@@ -184,6 +209,10 @@ export default function RubiksPage() {
                   disabled={!allSet}
                   className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-700">
             Debug Colors
+          </button>
+          <button onClick={testCube}
+                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500">
+            Test Cube
           </button>
           {!allSet && <span className="text-sm text-neutral-400">Need all 6 faces</span>}
           {error && <span className="text-sm text-red-400">{error}</span>}
@@ -264,17 +293,24 @@ export default function RubiksPage() {
         )}
 
         {/* Results */}
-        {moves.length > 0 && (
+        {(moves.length > 0 || initialCubeState) && (
           <div className="mt-8 space-y-6">
             {/* 3D Animation */}
             <div className="rounded-2xl border border-neutral-800 p-4 bg-neutral-900/50">
-              <div className="font-medium mb-4">3D Cube Solver Animation</div>
+              <div className="font-medium mb-4">
+                3D Cube Solver Animation
+                <div className="text-xs text-neutral-400 mt-1">
+                  Current state: {initialCubeState ? `"${initialCubeState.slice(0, 20)}..."` : "No cube state"}
+                </div>
+              </div>
               
               {/* 3D Cube Viewer */}
               <div className="h-[500px]">
                 <CubeViewer 
+                  key={`cube-${initialCubeState}`} // Force complete re-render when cube state changes
                   moves={moves} 
                   onMoveChange={(moveIndex) => setCurrentMoveIndex(moveIndex)}
+                  initialCubeState={initialCubeState}
                 />
               </div>
             </div>
